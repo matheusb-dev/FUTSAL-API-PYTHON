@@ -1,0 +1,621 @@
+import tkinter as tk
+from tkinter import ttk, messagebox
+import csv
+import os
+from datetime import datetime
+import re 
+
+# --- INÍCIO DA CLASSE FutsalAdminApp ---
+
+class FutsalAdminApp:
+    def __init__(self, master):
+        self.master = master
+        master.title("⚽ Gerenciador de Jogadores de Futsal (Admin - Cadastro)")
+        
+        # Configuração para tela cheia
+        try:
+            master.state('zoomed')
+        except tk.TclError:
+            
+            screen_width = master.winfo_screenwidth()
+            screen_height = master.winfo_screenheight()
+            master.geometry(f"{screen_width}x{screen_height}+0+0")
+        
+        # --- Configurações do Sistema ---
+        self.ARQUIVO_PENDENTES = 'jogadores_pendentes.csv'
+        self.ARQUIVO_AUTORIZADOS = 'jogadores_autorizados.csv'
+        
+        # --- COLUNAS ---
+        self.COLUNAS_CADASTRO = [
+            'Nome_do_Responsavel', 
+            'CPF_do_Responsavel', 
+            'Tel_do_Responsavel', 
+            'Endereco_do_Responsavel', 
+            'Nome_do_Jogador', 
+            'Idade_do_Jogador', 
+            'Turma'
+        ]
+        
+        # CPF é usado como rótulo, mas NÃO tem função de chave única para remoção/edição
+        self.CHAVE_CADASTRO = 'CPF_do_Responsavel' 
+        self.COLUNAS_AUTORIZADOS = self.COLUNAS_CADASTRO.copy() 
+        
+        # Inicialização de Variáveis de Instância
+        self.entries_admin = {}      
+        self.tree_pendentes = None 
+        self.tree_autorizados = None 
+        # Armazena os dados ORIGINAIS da linha selecionada para uso como ID na remoção/edição
+        self.jogador_selecionado_dados_originais = None 
+        self.modo_edicao = 'PENDENTE' 
+        
+        # Configuração de Estilo
+        self.style = ttk.Style()
+        self.style.theme_use('clam') 
+        
+        self.style.configure('Principal.TButton', font=('Times New Roman', 11, 'bold'), foreground='white', background='#007BFF', padding=8)
+        self.style.map('Principal.TButton', background=[('active', '#0056b3')]) 
+        
+        self.style.configure('Remover.TButton', font=('Times New Roman', 11, 'bold'), foreground='white', background='#C0392B', padding=8)
+        self.style.map('Remover.TButton', background=[('active', '#922B21')]) 
+        
+        self.style.configure('Edicao.TButton', font=('Times New Roman', 11, 'bold'), foreground='white', background='#17A2B8', padding=8)
+        self.style.map('Edicao.TButton', background=[('active', '#138496')]) 
+        
+        self.style.configure('Autorizados.Heading.Treeview.Heading', background='#27AE60', foreground='white', font=('Times New Roman', 10, 'bold'), anchor='center')
+        self.style.configure('Pendentes.Heading.Treeview.Heading', background='#F39C12', foreground='black', font=('Times New Roman', 10, 'bold'), anchor='center')
+        
+        self.style.configure("Custom.Treeview", rowheight=25, font=('Times New Roman', 9))
+        self.style.map('Treeview', background=[('selected', '#007BFF')], foreground=[('selected', 'white')])
+
+        self._criar_interface()
+        
+ 
+    # FUNÇÕES DE ARQUIVO (USANDO A LINHA COMPLETA COMO ID) 
+    
+    
+    def _verificar_arquivo(self, nome_arquivo):
+        if not os.path.exists(nome_arquivo):
+            colunas_ref = self.COLUNAS_AUTORIZADOS if nome_arquivo == self.ARQUIVO_AUTORIZADOS else self.COLUNAS_CADASTRO
+            with open(nome_arquivo, mode='w', newline='', encoding='utf-8') as f:
+                escritor = csv.writer(f, delimiter=';')
+                escritor.writerow(colunas_ref) 
+
+    def _ler_todos_dados(self, nome_arquivo, colunas):
+        if not os.path.exists(nome_arquivo):
+            return []
+        dados = []
+        try:
+            with open(nome_arquivo, mode='r', newline='', encoding='utf-8') as f:
+                leitor = csv.reader(f, delimiter=';')
+                cabecalho = next(leitor, None)
+                if cabecalho != colunas:
+                    messagebox.showwarning("Aviso de Arquivo", f"O cabeçalho de '{nome_arquivo}' não coincide com o esperado.")
+                    return []
+                for linha in leitor:
+                    if len(linha) == len(colunas):
+                        dados.append(linha)
+                    else:
+                        dados.append(linha + ['ERRO'] * (len(colunas) - len(linha))) 
+        except Exception as e:
+            messagebox.showerror("Erro de Leitura", f"Falha ao ler o arquivo {nome_arquivo}: {e}")
+            return []
+        return dados
+        
+    def _adicionar_registro(self, nome_arquivo, dados, colunas):
+        try:
+            with open(nome_arquivo, mode='a', newline='', encoding='utf-8') as f:
+                escritor = csv.writer(f, delimiter=';')
+                escritor.writerow(dados)
+            return True
+        except Exception as e:
+            messagebox.showerror("Erro de Escrita", f"Falha ao adicionar registro em {nome_arquivo}: {e}")
+            return False
+
+    def _remover_registro_por_dados(self, nome_arquivo, dados_para_remover, colunas):
+        """Remove o registro que corresponde EXATAMENTE a todos os dados fornecidos."""
+        try:
+            todos_dados = self._ler_todos_dados(nome_arquivo, colunas)
+            
+            dados_alvo_normalizados = [d.strip() for d in dados_para_remover]
+            
+            dados_filtrados = []
+            registro_removido = False
+            
+            for linha in todos_dados:
+                linha_normalizada = [d.strip() for d in linha]
+                
+                # Compara a linha COMPLETA
+                if linha_normalizada == dados_alvo_normalizados and not registro_removido:
+                    registro_removido = True 
+                    continue 
+                
+                dados_filtrados.append(linha)
+            
+            if not registro_removido:
+                return False 
+            
+            with open(nome_arquivo, mode='w', newline='', encoding='utf-8') as f:
+                escritor = csv.writer(f, delimiter=';')
+                escritor.writerow(colunas)
+                escritor.writerows(dados_filtrados) 
+                
+            return True
+            
+        except Exception as e:
+            messagebox.showerror("Erro de Remoção", f"Falha ao remover registro de {nome_arquivo}: {e}")
+            return False
+
+    def _atualizar_registro_por_dados(self, nome_arquivo, dados_antigos, novos_dados, colunas):
+        """Atualiza um registro baseado na CORRESPONDÊNCIA EXATA de todos os dados antigos."""
+        try:
+            todos_dados = self._ler_todos_dados(nome_arquivo, colunas)
+            
+            dados_alvo_normalizados = [d.strip() for d in dados_antigos]
+            
+            registro_encontrado = False
+            dados_atualizados = []
+            
+            for linha in todos_dados:
+                linha_normalizada = [d.strip() for d in linha]
+                
+                # Compara a linha COMPLETA com os dados antigos
+                if linha_normalizada == dados_alvo_normalizados and not registro_encontrado:
+                    dados_atualizados.append(novos_dados)
+                    registro_encontrado = True
+                else:
+                    dados_atualizados.append(linha) 
+            
+            if not registro_encontrado:
+                return False
+                
+            with open(nome_arquivo, mode='w', newline='', encoding='utf-8') as f:
+                escritor = csv.writer(f, delimiter=';')
+                escritor.writerow(colunas)
+                escritor.writerows(dados_atualizados) 
+                
+            return True
+            
+        except Exception as e:
+            messagebox.showerror("Erro de Atualização", f"Falha ao atualizar registro em {nome_arquivo}: {e}")
+            return False
+
+    def _atualizar_treeview(self, treeview, nome_arquivo, colunas):
+        for i in treeview.get_children():
+            treeview.delete(i)
+        
+        dados = self._ler_todos_dados(nome_arquivo, colunas)
+        
+        for linha in dados:
+            if len(linha) == len(colunas):
+                treeview.insert('', 'end', values=linha, text=linha[0]) 
+            else:
+                treeview.insert('', 'end', values=linha, tags=('erro',))
+                treeview.tag_configure('erro', background='#FFDDDD')
+
+    # ----------------------------------------------------------------------
+    # --- CRIAÇÃO DA INTERFACE ---
+    # ----------------------------------------------------------------------
+    
+    def _cria_scrollable_frame(self, container):
+        outer_frame = ttk.Frame(container)
+        outer_frame.pack(fill="both", expand=True) 
+        
+        canvas = tk.Canvas(outer_frame, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(outer_frame, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas, padding=17)
+        
+        def on_frame_configure(event):
+            # A nova largura da moldura é a largura da janela, menos a largura da barra de rolagem (se houver)
+            canvas.configure(scrollregion=canvas.bbox("all"))
+            canvas.itemconfig(window_id, width=event.width) # Garante que o frame interno tenha a largura do canvas
+
+        window_id = canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        scrollable_frame.bind("<Configure>", on_frame_configure)
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        scrollbar.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+        
+        scrollable_frame.grid_columnconfigure(1, weight=1) 
+        return scrollable_frame
+
+    def _criar_treeview_com_scroll(self, parent_frame, colunas, altura=5, heading_style_name=''):
+        # Removendo a altura fixa para que a Treeview possa expandir
+        altura_ajustada = 8 # Mantendo um valor pequeno, mas o 'expand=True' fará o trabalho
+        
+        frame_tree = ttk.Frame(parent_frame)
+        # Permite que o frame da Treeview preencha e se expanda no widget pai (frame_pendentes/autorizados)
+        frame_tree.pack(fill="both", expand=True, pady=5) 
+
+        vsb = ttk.Scrollbar(frame_tree, orient="vertical")
+        hsb = ttk.Scrollbar(frame_tree, orient="horizontal") 
+        
+        tree = ttk.Treeview(frame_tree, columns=colunas, show='headings', height=altura_ajustada,
+                            yscrollcommand=vsb.set, xscrollcommand=hsb.set, style="Custom.Treeview")
+        
+        vsb.config(command=tree.yview)
+        hsb.config(command=tree.xview)
+        
+        hsb.pack(side="bottom", fill="x") 
+        vsb.pack(side="right", fill="y")
+        # Ajuste: A Treeview deve expandir-se totalmente no frame_tree
+        tree.pack(side="left", fill="both", expand=True) 
+
+        for col in colunas:
+            tree.heading(col, text=col.replace('_', ' '), anchor='center') 
+            # Define uma largura inicial, mas o fill/expand ajudará na expansão
+            tree.column(col, width=int(800 / len(colunas)), minwidth=50, anchor='center') 
+            
+        if self.CHAVE_CADASTRO in colunas:
+            tree.column(self.CHAVE_CADASTRO, width=120, minwidth=100, anchor='center') 
+            
+        if heading_style_name:
+            self.style.configure(f"{heading_style_name}.Treeview.Heading", 
+                                 **self.style.configure(heading_style_name))
+        else:
+            self.style.configure("Treeview.Heading", font=('Times New Roman', 11, 'bold'), anchor='center')
+
+        return tree
+        
+    def _criar_aba_cadastro_form(self, aba, target_entries, colunas_ref):
+        frame_cadastro = ttk.LabelFrame(aba, text="Dados do Jogador e Responsável em Análise/Visualização", padding="5")
+        # Ajuste: Removendo o padx fixo para melhor expansão na tela cheia
+        frame_cadastro.pack(pady=3, fill="x") 
+        
+        scrollable_content = self._cria_scrollable_frame(frame_cadastro)
+        form_content = scrollable_content 
+        
+        # Garante que a coluna 1 do formulário se expanda dentro do frame rolável
+        form_content.grid_columnconfigure(1, weight=1) 
+        
+        campos_dict = {
+            'Nome_do_Responsavel': "Nome do Responsável:",
+            'CPF_do_Responsavel': f"{self.CHAVE_CADASTRO.replace('_', ' ')} (Não é chave única):", 
+            'Tel_do_Responsavel': "Telefone do Responsável:",
+            'Endereco_do_Responsavel': "Endereço do Responsável:",
+            'Nome_do_Jogador': "Nome do Jogador:",
+            'Idade_do_Jogador': "Idade do Jogador (Apenas Número):",
+            'Turma': "Turma:" 
+        }
+        
+        row_index = 0
+        colunas_filtro_form = self.COLUNAS_CADASTRO 
+        for col_name in colunas_filtro_form: 
+            if col_name in campos_dict:
+                ttk.Label(form_content, text=campos_dict[col_name]).grid(row=row_index, column=0, padx=10, pady=5, sticky="w")
+                
+                entry = ttk.Entry(form_content, font=('Times New Roman', 11)) 
+                # Ajuste: sticky="ew" para que o campo de entrada preencha a largura disponível
+                entry.grid(row=row_index, column=1, padx=301, pady=5, sticky="ew") 
+                
+                target_entries[col_name] = entry
+                row_index += 1
+                
+        return frame_cadastro, row_index
+
+    def _criar_aba_admin_conteudo(self, aba):
+        # Garante que a coluna 0 da aba se expanda horizontalmente
+        aba.grid_columnconfigure(0, weight=1) 
+        # Distribui o espaço verticalmente para as duas Treeviews
+        aba.grid_rowconfigure(1, weight=1) 
+        aba.grid_rowconfigure(2, weight=1) 
+        aba.grid_rowconfigure(0, weight=0) # O frame de cadastro (topo) não precisa expandir na altura
+        
+        frame_top = ttk.Frame(aba)
+        # Ajuste: Removendo o padx fixo para melhor expansão horizontal
+        frame_top.grid(row=0, column=0, pady=5, sticky="ew") 
+        frame_top.grid_columnconfigure(0, weight=1) 
+
+        frame_cadastro_label, _ = self._criar_aba_cadastro_form(frame_top, self.entries_admin, self.COLUNAS_AUTORIZADOS)
+        
+        # BOTOES DE AÇÃO
+        self.frame_botoes_acao = ttk.Frame(frame_cadastro_label) 
+        self.frame_botoes_acao.pack(pady=(5, 15), padx=10, fill="x")
+        
+        # Garante que os botões se expandam horizontalmente dentro do frame de botões
+        # Mudado para 3 colunas para acomodar o novo botão
+        self.frame_botoes_acao.columnconfigure(0, weight=1)
+        self.frame_botoes_acao.columnconfigure(1, weight=1)
+        self.frame_botoes_acao.columnconfigure(2, weight=1)
+        
+        self.btn_aprovar = ttk.Button(self.frame_botoes_acao, text="✅ AUTORIZAR CADASTRO", command=self.aprovar_jogador, style='Principal.TButton')
+        self.btn_rejeitar = ttk.Button(self.frame_botoes_acao, text="❌ REJEITAR CADASTRO", command=self.rejeitar_jogador, style='Remover.TButton')
+        self.btn_limpar = ttk.Button(self.frame_botoes_acao, text="Limpar", command=self._limpar_campos_admin)
+        
+        # BOTÃO SALVAR ALTERAÇÃO
+        self.btn_salvar_alteracao = ttk.Button(self.frame_botoes_acao, text="📝 SALVAR ALTERAÇÃO", command=self.editar_jogador_autorizado, style='Edicao.TButton')
+        
+        # ### Alterações Feitas Aqui
+        # NOVO BOTÃO DE REMOÇÃO (para o modo de edição de autorizado)
+        self.btn_remover_jogador_form = ttk.Button(self.frame_botoes_acao, 
+                                                   text="🗑️ REMOVER JOGADOR", 
+                                                   command=self.remover_jogador_autorizado_form, 
+                                                   style='Remover.TButton')
+        # ### Fim das Alterações
+        
+        self._alternar_botoes('PENDENTE') 
+
+        # 1. Lista de Pendentes
+        frame_pendentes = ttk.LabelFrame(aba, text="1. LISTA DE ESPERA: CADASTROS PENDENTES (Amarelo - Clique para carregar e Autorizar/Rejeitar)", padding="5")
+        # Ajuste: sticky="nsew" para preencher todas as direções e expandir na coluna 0, linha 1
+        frame_pendentes.grid(row=1, column=0, padx=10, pady=5, sticky="nsew") 
+        frame_pendentes.grid_columnconfigure(0, weight=1) 
+        frame_pendentes.grid_rowconfigure(0, weight=1) # A Treeview estará dentro e precisa expandir
+
+        self.tree_pendentes = self._criar_treeview_com_scroll(frame_pendentes, self.COLUNAS_CADASTRO, altura=5, heading_style_name='Pendentes.Heading.Treeview.Heading')
+        self.tree_pendentes.bind("<<TreeviewSelect>>", self._carregar_pendente_para_aprovacao)
+        
+        # 2. Lista de Autorizados
+        frame_autorizados = ttk.LabelFrame(aba, text="2. JOGADORES AUTORIZADOS (Verde - Clique para EDITAR/Salvar Alteração ou Excluir)", padding="5")
+        # Ajuste: sticky="nsew" para preencher todas as direções e expandir na coluna 0, linha 2
+        frame_autorizados.grid(row=2, column=0, padx=10, pady=5, sticky="nsew") 
+        frame_autorizados.grid_columnconfigure(0, weight=1) 
+        frame_autorizados.grid_rowconfigure(0, weight=1) # A Treeview estará dentro e precisa expandir
+
+        self.tree_autorizados = self._criar_treeview_com_scroll(frame_autorizados, self.COLUNAS_AUTORIZADOS, altura=5, heading_style_name='Autorizados.Heading.Treeview.Heading')
+        self.tree_autorizados.bind("<<TreeviewSelect>>", self._carregar_autorizado_para_edicao) 
+        
+        # Botão de Exclusão (mantido, mas a exclusão pelo form é mais explícita)
+        frame_botoes_excluir_autorizado = ttk.Frame(frame_autorizados)
+        frame_botoes_excluir_autorizado.pack(pady=5, fill="x")
+        frame_botoes_excluir_autorizado.columnconfigure(0, weight=1)
+
+        ttk.Button(frame_botoes_excluir_autorizado, text="🗑️ EXCLUIR JOGADOR SELECIONADO DA LISTA (Ação Rápida)", command=self.excluir_jogador_autorizado, style='Remover.TButton').pack(fill="x") 
+
+    def _criar_interface(self):
+        self.notebook = ttk.Notebook(self.master)
+        # Ajuste: expand=True e fill="both" para que o notebook preencha a janela maximizada
+        self.notebook.pack(pady=10, padx=10, expand=True, fill="both")
+
+        self.aba_admin = ttk.Frame(self.notebook) 
+        self.notebook.add(self.aba_admin, text=" ⚙️ Administração (Aprovação e Edição)")
+        self._criar_aba_admin_conteudo(self.aba_admin) 
+        
+        self._verificar_arquivo(self.ARQUIVO_AUTORIZADOS)
+        self._verificar_arquivo(self.ARQUIVO_PENDENTES)
+        
+        self._carregar_admin_dados()
+
+    
+
+    def _alternar_botoes(self, modo):
+        """Controla quais botões de ação são exibidos no formulário."""
+        self.modo_edicao = modo
+        for widget in self.frame_botoes_acao.winfo_children():
+            widget.grid_forget()
+        
+        if modo == 'PENDENTE': 
+            self.btn_aprovar.grid(row=0, column=0, padx=5, sticky="ew")
+            self.btn_rejeitar.grid(row=0, column=1, padx=5, sticky="ew")
+            self.btn_limpar.grid(row=0, column=2, padx=5, sticky="ew")
+        elif modo == 'EDICAO_AUTORIZADO': 
+            # Mostra SALVAR ALTERAÇÃO
+            self.btn_salvar_alteracao.grid(row=0, column=0, padx=5, sticky="ew")
+            
+            # Alterações Feitas Aqui
+            # NOVO BOTÃO: REMOVER JOGADOR (ao lado de SALVAR ALTERAÇÃO)
+            self.btn_remover_jogador_form.grid(row=0, column=1, padx=5, sticky="ew") 
+            # Fim das Alterações
+            
+            self.btn_limpar.grid(row=0, column=2, padx=5, sticky="ew")
+            
+    def _limpar_campos_admin(self, event=None):
+        self.jogador_selecionado_dados_originais = None # Limpa os dados de referência
+        for col_name, entry in self.entries_admin.items(): 
+            entry.delete(0, tk.END)
+            entry.config(state='normal') 
+        self._alternar_botoes('PENDENTE')
+            
+    def _carregar_pendente_para_aprovacao(self, event):
+        item_selecionado_id = self.tree_pendentes.focus()
+        if not item_selecionado_id: return
+        
+        self._limpar_campos_admin()
+        self._alternar_botoes('PENDENTE')
+
+        dados_pendentes = self.tree_pendentes.item(item_selecionado_id, 'values')
+        
+        for i, col_name in enumerate(self.COLUNAS_CADASTRO):
+            if col_name in self.entries_admin and i < len(dados_pendentes):
+                self.entries_admin[col_name].insert(0, dados_pendentes[i])
+        
+        # Armazena os dados completos para fins de remoção/autorização (chave completa)
+        self.jogador_selecionado_dados_originais = list(dados_pendentes)
+        
+        nome_responsavel = dados_pendentes[self.COLUNAS_CADASTRO.index('Nome_do_Responsavel')]
+        messagebox.showinfo("Carregado", f"Cadastro do Responsável **{nome_responsavel}** carregado para AUTORIZAR/REJEITAR.")
+
+
+    def _carregar_autorizado_para_edicao(self, event):
+        item_selecionado_id = self.tree_autorizados.focus()
+        if not item_selecionado_id: return
+        
+        self._limpar_campos_admin() 
+        self._alternar_botoes('EDICAO_AUTORIZADO') 
+        
+        dados_autorizados = self.tree_autorizados.item(item_selecionado_id, 'values')
+        
+        if len(dados_autorizados) < len(self.COLUNAS_AUTORIZADOS):
+            messagebox.showerror("Erro de Leitura", "Os dados do jogador selecionado estão incompletos no arquivo.")
+            return
+
+        for i, col_name in enumerate(self.COLUNAS_AUTORIZADOS):
+            if col_name in self.entries_admin:
+                self.entries_admin[col_name].insert(0, dados_autorizados[i])
+        
+        # Armazena os dados completos da linha para ser o alvo da edição (dados_antigos)
+        self.jogador_selecionado_dados_originais = list(dados_autorizados)
+        
+        nome_responsavel = dados_autorizados[self.COLUNAS_AUTORIZADOS.index('Nome_do_Responsavel')]
+        messagebox.showinfo("Carregado", f"Cadastro do Responsável **{nome_responsavel}** carregado para EDIÇÃO. Altere os campos e clique em 'SALVAR ALTERAÇÃO'.")
+
+    def _validar_campos(self, dados_completos):
+        """Função auxiliar para validar campos."""
+        campos_vazios = any(not valor for valor in dados_completos)
+        if campos_vazios:
+            messagebox.showwarning("Aviso", "Todos os campos devem ser preenchidos.")
+            return False
+
+        # Validação da Idade
+        idade_index = self.COLUNAS_AUTORIZADOS.index('Idade_do_Jogador')
+        try: 
+            idade = int(dados_completos[idade_index])
+            if idade <= 0 or idade > 100:
+                 messagebox.showerror("Erro de Idade", "A Idade do Jogador deve ser um número inteiro positivo e realista.")
+                 return False
+        except ValueError:
+            messagebox.showerror("Erro de Idade", "A Idade do Jogador deve ser um número inteiro válido.")
+            return False
+            
+        return True
+
+    def aprovar_jogador(self):
+        dados_pendentes_originais = self.jogador_selecionado_dados_originais
+        
+        if self.modo_edicao != 'PENDENTE' or not dados_pendentes_originais:
+            messagebox.showwarning("Aviso", "Selecione um cadastro na lista **Pendente (Amarela)** para AUTORIZAR.")
+            return
+            
+        dados_completos = [self.entries_admin.get(col_name).get().strip() for col_name in self.COLUNAS_AUTORIZADOS]
+            
+        if not self._validar_campos(dados_completos):
+            return
+            
+        if self._adicionar_registro(self.ARQUIVO_AUTORIZADOS, dados_completos, colunas=self.COLUNAS_AUTORIZADOS):
+            # Remove usando a linha de dados original
+            if self._remover_registro_por_dados(self.ARQUIVO_PENDENTES, dados_pendentes_originais, colunas=self.COLUNAS_CADASTRO):
+                nome_responsavel = dados_completos[self.COLUNAS_AUTORIZADOS.index('Nome_do_Responsavel')]
+                messagebox.showinfo("Sucesso", f"Cadastro do Responsável **{nome_responsavel}** **AUTORIZADO** e **removido** da lista pendente.")
+                self._carregar_admin_dados() 
+            else:
+                messagebox.showwarning("Aviso", "Autorizado, mas houve **falha na remoção** da lista pendente. Remova manualmente.")
+        else: 
+            messagebox.showerror("Erro", "Falha ao adicionar registro autorizado.")
+
+    def editar_jogador_autorizado(self):
+        dados_antigos = self.jogador_selecionado_dados_originais
+        
+        if self.modo_edicao != 'EDICAO_AUTORIZADO' or not dados_antigos:
+            messagebox.showwarning("Aviso", "Selecione um jogador na lista **Autorizados (Verde)** e altere os campos para SALVAR ALTERAÇÃO.")
+            return
+            
+        dados_completos = [self.entries_admin.get(col_name).get().strip() for col_name in self.COLUNAS_AUTORIZADOS]
+            
+        if not self._validar_campos(dados_completos):
+            return
+        
+        nome_responsavel = dados_completos[self.COLUNAS_AUTORIZADOS.index('Nome_do_Responsavel')]
+        cpf_atual = dados_completos[self.COLUNAS_AUTORIZADOS.index(self.CHAVE_CADASTRO)]
+        
+        confirmar = messagebox.askyesno("Confirmar Edição", f"Deseja salvar as alterações para o cadastro do Responsável {nome_responsavel} (CPF: {cpf_atual})?")
+
+        if not confirmar: return
+            
+        # Atualiza usando os dados antigos como chave de busca e os dados completos como substituição
+        if self._atualizar_registro_por_dados(self.ARQUIVO_AUTORIZADOS, dados_antigos, dados_completos, colunas=self.COLUNAS_AUTORIZADOS):
+            messagebox.showinfo("Sucesso", f"Cadastro do Responsável **{nome_responsavel}** **EDITADO** (Salvo Alteração) com sucesso.")
+            # Atualiza os dados originais para os novos, caso haja mais edições sem recarregar
+            self.jogador_selecionado_dados_originais = dados_completos 
+            self._carregar_admin_dados() 
+        else: 
+            messagebox.showerror("Erro", "Falha ao editar o registro de autorizado. Nenhuma correspondência exata encontrada para os dados originais.")
+
+    def rejeitar_jogador(self):
+        dados_rejeitar = self.jogador_selecionado_dados_originais
+        
+        if self.modo_edicao != 'PENDENTE' or not dados_rejeitar:
+            messagebox.showwarning("Aviso", "Selecione um cadastro na lista **Pendente (amarela)** para rejeitar.")
+            return
+            
+        cpf_referencia = dados_rejeitar[self.COLUNAS_CADASTRO.index(self.CHAVE_CADASTRO)]
+        
+        confirmar = messagebox.askyesno("Confirmar Rejeição", f"Deseja **rejeitar** e remover o cadastro com CPF do Responsável: {cpf_referencia} da lista pendente?")
+        
+        if not confirmar: return
+        
+        if self._remover_registro_por_dados(self.ARQUIVO_PENDENTES, dados_rejeitar, colunas=self.COLUNAS_CADASTRO):
+            messagebox.showinfo("Rejeitado", f"Cadastro com CPF do Responsável **{cpf_referencia}** foi removido da lista pendente.")
+            self._limpar_campos_admin()
+            self._carregar_admin_dados()
+        else: 
+            messagebox.showerror("Erro", "Falha ao rejeitar o cadastro.")
+            
+    # Alterações Feitas Aqui
+    def remover_jogador_autorizado_form(self):
+        """Remove o jogador autorizado usando os dados atualmente carregados no formulário como alvo."""
+        dados_remover = self.jogador_selecionado_dados_originais
+        
+        if self.modo_edicao != 'EDICAO_AUTORIZADO' or not dados_remover:
+            messagebox.showwarning("Aviso", "Selecione um jogador na lista **Autorizados (Verde)** e carregue-o para o formulário para REMOVER.")
+            return
+        
+        # Usa os dados originais como a chave para a remoção
+        dados_completos_originais = self.jogador_selecionado_dados_originais
+        
+        nome_resp_index = self.COLUNAS_AUTORIZADOS.index('Nome_do_Responsavel')
+        chave_index = self.COLUNAS_AUTORIZADOS.index(self.CHAVE_CADASTRO)
+        
+        nome_responsavel = dados_completos_originais[nome_resp_index]
+        cpf_referencia = dados_completos_originais[chave_index]
+        
+        confirmar = messagebox.askyesno(
+            "Confirmar Remoção", 
+            f"Tem certeza que deseja **REMOVER permanentemente** o cadastro do Responsável **{nome_responsavel}** (CPF: **{cpf_referencia}**) da lista de Autorizados? Esta ação não pode ser desfeita."
+        )
+        
+        if not confirmar:
+            return
+            
+        # Remove usando a linha completa original como alvo
+        if self._remover_registro_por_dados(self.ARQUIVO_AUTORIZADOS, dados_completos_originais, colunas=self.COLUNAS_AUTORIZADOS):
+            messagebox.showinfo("Sucesso", f"Cadastro do Responsável **{nome_responsavel}** foi **REMOVIDO** com sucesso.")
+            self._carregar_admin_dados() 
+        else: 
+            messagebox.showerror("Erro", "Falha ao remover o cadastro autorizado. Nenhuma correspondência exata encontrada para os dados originais.")
+    # ### Fim das Alterações
+
+    def excluir_jogador_autorizado(self):
+        item_selecionado_id = self.tree_autorizados.focus()
+        if not item_selecionado_id:
+            messagebox.showwarning("Aviso", "Selecione um cadastro na lista VERDE de Autorizados para excluir.")
+            return
+
+        dados_autorizados = self.tree_autorizados.item(item_selecionado_id, 'values')
+        
+        nome_resp_index = self.COLUNAS_AUTORIZADOS.index('Nome_do_Responsavel')
+        chave_index = self.COLUNAS_AUTORIZADOS.index(self.CHAVE_CADASTRO)
+        
+        nome_responsavel = dados_autorizados[nome_resp_index] if len(dados_autorizados) > nome_resp_index else "N/A"
+        cpf_referencia = dados_autorizados[chave_index] if len(dados_autorizados) > chave_index else "N/A"
+        
+        if not dados_autorizados:
+            messagebox.showerror("Erro", "Não foi possível obter os dados completos do cadastro selecionado.")
+            return
+
+        confirmar = messagebox.askyesno(
+            "Confirmar Exclusão", 
+            f"Tem certeza que deseja **EXCLUIR permanentemente** o cadastro do Responsável **{nome_responsavel}** (CPF: **{cpf_referencia}**) da lista de Autorizados? (Ação Rápida)"
+        )
+        
+        if not confirmar:
+            return
+            
+        # Remove usando a linha completa como alvo
+        if self._remover_registro_por_dados(self.ARQUIVO_AUTORIZADOS, list(dados_autorizados), colunas=self.COLUNAS_AUTORIZADOS):
+            messagebox.showinfo("Sucesso", f"Cadastro do Responsável **{nome_responsavel}** foi excluído da lista de Autorizados.")
+            self._carregar_admin_dados() 
+        else: 
+            messagebox.showerror("Erro", "Falha ao excluir o cadastro autorizado.")
+
+    def _carregar_admin_dados(self):
+        """Atualiza ambas as Treeviews e limpa o formulário de entrada."""
+        self._atualizar_treeview(self.tree_pendentes, self.ARQUIVO_PENDENTES, colunas=self.COLUNAS_CADASTRO)
+        self._atualizar_treeview(self.tree_autorizados, self.ARQUIVO_AUTORIZADOS, colunas=self.COLUNAS_AUTORIZADOS)
+        self._limpar_campos_admin()
+        
+
+# EXECUTA O PROGRAMA
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = FutsalAdminApp(root)
+    root.mainloop()
