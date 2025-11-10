@@ -45,7 +45,7 @@ Marcar essa opção garante que você possa usar os comandos `python` e `pip` di
 <br>
 
 ---------------------------------------------
-## Conectando a API - GABRIEL
+## GABRIEL - Conectando a API
 
 <h5>Tarefa :</h5>
 
@@ -69,7 +69,7 @@ Marcar essa opção garante que você possa usar os comandos `python` e `pip` di
 <br>
 
 ---------------------------------------------
-## Criação da Página Web Utilizando Python - OTAVIO
+## OTAVIO - Criação da Página Web Utilizando Python
 
 <h5>Tarefa :</h5>
 
@@ -116,7 +116,7 @@ pip install Flask
 
 ---------------------------------------------
 
-## Criação da Interface de Times e Boleto - LUIZ
+## LUIZ - Criação da Interface de Times e Boleto
 
 <h5>Tarefa :</h5>
 
