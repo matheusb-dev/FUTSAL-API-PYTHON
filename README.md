@@ -116,7 +116,19 @@ pip install Flask
 
 ---------------------------------------------
 
+## Criação da Interface de Times e Boleto - LUIZ
 
+<h5>Tarefa :</h5>
 
+<p>Fazer 2 interface juntos de Times e Boletos. Ao clicar no Times vai mostrar quais são os jogadores que estão neste times.</p>
+
+<img src="/images/Times.png">
+<img src="/images/Time_Click.png">
+
+<br>
+
+<p>Depois fazer outra para boleto se está pago ou não.</p>
+
+<img src="/images/Boletos.png">
 
 
