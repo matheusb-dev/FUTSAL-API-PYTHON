@@ -44,6 +44,22 @@ Marcar essa opção garante que você possa usar os comandos `python` e `pip` di
 
 <br>
 
+1. Atualize pip (opcional, mas recomendado)
+```bash
+pip install --upgrade 
+```
+
+2. Instale as dependências a partir do 
+```bash
+pip install -r requirements.txt
+```
+
+3. Instalar o Flask:
+```bash
+pip install Flask
+```
+<br>
+
 ---------------------------------------------
 ## GABRIEL - Conectando a API
 
@@ -84,22 +100,6 @@ futsal-api-python/
     └── formulario.html —> Otávio
 ```
 
-
-
-1. Atualize pip (opcional, mas recomendado)
-```bash
-pip install --upgrade 
-```
-
-2. Instale as dependências a partir do 
-```bash
-pip install -r requirements.txt
-```
-
-3. Instalar o Flask:
-```bash
-pip install Flask
-```
 <br>
 
 <h9>**Sua página de cadastro precisa ter:**<h9>
