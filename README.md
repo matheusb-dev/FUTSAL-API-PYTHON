@@ -45,7 +45,7 @@ Marcar essa opção garante que você possa usar os comandos `python` e `pip` di
 <br>
 
 ---------------------------------------------
-## Criação da Página Web Utilizando Python - GABRIEL
+## Conectando com a API - GABRIEL
 
 <h5>Tarefa :</h5>
 
