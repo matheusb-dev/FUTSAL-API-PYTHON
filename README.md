@@ -45,7 +45,7 @@ Marcar essa opção garante que você possa usar os comandos `python` e `pip` di
 <br>
 
 ---------------------------------------------
-## Conectando com a API - GABRIEL
+## Criação da Página Web Utilizando Python - GABRIEL
 
 <h5>Tarefa :</h5>
 
@@ -54,6 +54,10 @@ Marcar essa opção garante que você possa usar os comandos `python` e `pip` di
 <h9>*OBSERVAÇÃO 1*: **VOCÊ VAI MEXER DESDA DA CONFIGURAÇÃO DO GOOGLE SHEETS, ATE NO NOSSO CÓDIGO PARA VER SE ESTÁ PUXANDO CERTO OU NÃO**</h9>
 
 <br>
+
+<p>Página Web</p>
+<img src="/images/cadastro_template.png">
+<h2> Assim que forem cadastrados deveram aparecerem na lista dos aprovados </h2>
 
 <p>Jogadores pendendes</p>
 <img src="/images/jogadores_pendentes.png">
