@@ -270,7 +270,7 @@ class FutsalAdminApp:
         
         campos_dict = {
             'Nome_do_Responsavel': "Nome do Responsável:",
-            'CPF_do_Responsavel': f"{self.CHAVE_CADASTRO.replace('_', ' ')} (Não é chave única):", 
+            'CPF_do_Responsavel': f"{self.CHAVE_CADASTRO.replace('_', ' ')} :", 
             'Tel_do_Responsavel': "Telefone do Responsável:",
             'Endereco_do_Responsavel': "Endereço do Responsável:",
             'Nome_do_Jogador': "Nome do Jogador:",
@@ -618,4 +618,5 @@ class FutsalAdminApp:
 if __name__ == "__main__":
     root = tk.Tk()
     app = FutsalAdminApp(root)
+
     root.mainloop()
