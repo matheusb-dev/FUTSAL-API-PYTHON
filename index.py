@@ -4,7 +4,8 @@ from google.oauth2.service_account import Credentials
 import json
 import os
 
-app = Flask(__name__)
+# Indica explicitamente a pasta de templates
+app = Flask(__name__, template_folder="templates")
 
 # -----------------------------
 # CONFIG GOOGLE SHEETS
@@ -41,9 +42,9 @@ HEADERS = [
 ]
 
 def garantir_cabecalhos():
-    if sheet_pendentes.row_values(1) == []:
+    if not sheet_pendentes.row_values(1):
         sheet_pendentes.append_row(HEADERS)
-    if sheet_aprovados.row_values(1) == []:
+    if not sheet_aprovados.row_values(1):
         sheet_aprovados.append_row(HEADERS)
 
 garantir_cabecalhos()
@@ -59,12 +60,12 @@ def formulario():
 @app.route("/cadastrar", methods=["POST"])
 def cadastrar():
     dados = [
-        request.form["nome_responsavel"],
-        request.form["cpf_responsavel"],
-        request.form["telefone_responsavel"],
-        request.form["nome_jogador"],
-        request.form["cpf_jogador"],
-        request.form["data_nascimento"]
+        request.form.get("nome_responsavel", ""),
+        request.form.get("cpf_responsavel", ""),
+        request.form.get("telefone_responsavel", ""),
+        request.form.get("nome_jogador", ""),
+        request.form.get("cpf_jogador", ""),
+        request.form.get("data_nascimento", "")
     ]
 
     sheet_pendentes.append_row(dados)
@@ -86,6 +87,5 @@ def aprovar(linha):
     return "Jogador aprovado com sucesso!"
 
 if __name__ == "__main__":
-    app.run(debug=True)
-
-# Deploy Vercel: atualizando variável de ambiente
+    # Localmente
+    app.run(debug=True, host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
