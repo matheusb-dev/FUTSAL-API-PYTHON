@@ -10,12 +10,13 @@ app = Flask(__name__, template_folder="templates")
 # -----------------------------
 # CONFIG GOOGLE SHEETS
 # -----------------------------
-
 SHEET_ID = "1OrF458H7gU3U2J4lamcX4uV_7cIcdLOr52jTK956aWU"
 
 # Escopo do Google Sheets
-scope = ["https://www.googleapis.com/auth/spreadsheets",
-         "https://www.googleapis.com/auth/drive"]
+scope = [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive"
+]
 
 # --- CARREGA A CHAVE DE FORMA COMPATÍVEL COM O VERCEL ---
 if os.getenv("GOOGLE_SERVICE_ACCOUNT"):
@@ -29,9 +30,11 @@ else:
 creds = Credentials.from_service_account_info(info, scopes=scope)
 client = gspread.authorize(creds)
 
+# Worksheets
 sheet_pendentes = client.open_by_key(SHEET_ID).worksheet("pendentes")
 sheet_aprovados = client.open_by_key(SHEET_ID).worksheet("aprovados")
 
+# Cabeçalhos
 HEADERS = [
     "Nome_do_Responsavel",
     "CPF_do_Responsavel",
