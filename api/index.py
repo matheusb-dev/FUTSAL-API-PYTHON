@@ -1,120 +1,95 @@
-from flask import Flask, render_template, request, jsonify
-import gspread
-from google.oauth2.service_account import Credentials
 import json
 import os
-
-# Caminho correto dos templates quando hospedado no Vercel
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-TEMPLATES_DIR = os.path.join(BASE_DIR, "../templates")
-
-app = Flask(__name__, template_folder=TEMPLATES_DIR)
+import gspread
+from google.oauth2.service_account import Credentials
 
 # -----------------------------
 # CONFIG GOOGLE SHEETS
 # -----------------------------
 SHEET_ID = "1OrF458H7gU3U2J4lamcX4uV_7cIcdLOr52jTK956aWU"
+
 scope = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive"
 ]
 
-# --- CARREGA A CHAVE DO SERVICE ACCOUNT ---
-try:
-    if os.getenv("GOOGLE_SERVICE_ACCOUNT"):
-        # Vercel: chave vem da variável de ambiente (STRING JSON)
-        info = json.loads(os.getenv("GOOGLE_SERVICE_ACCOUNT"))
-    else:
-        # Local: arquivo JSON
-        with open("service_account.json") as f:
-            info = json.load(f)
+# -----------------------------
+# LOAD SERVICE ACCOUNT KEY
+# -----------------------------
+def load_sheets():
+    if not os.getenv("GOOGLE_SERVICE_ACCOUNT"):
+        raise Exception("Variável GOOGLE_SERVICE_ACCOUNT não encontrada!")
 
+    info = json.loads(os.getenv("GOOGLE_SERVICE_ACCOUNT"))
     creds = Credentials.from_service_account_info(info, scopes=scope)
     client = gspread.authorize(creds)
 
     sheet_pendentes = client.open_by_key(SHEET_ID).worksheet("pendentes")
     sheet_aprovados = client.open_by_key(SHEET_ID).worksheet("aprovados")
-
-except Exception as e:
-    print("ERRO ao conectar ao Google Sheets:", e)
-    raise e
+    return sheet_pendentes, sheet_aprovados
 
 
 # -----------------------------
-# CABEÇALHOS
+# HANDLER PRINCIPAL DA VERCEL
 # -----------------------------
-HEADERS = [
-    "Nome_do_Responsavel",
-    "CPF_do_Responsavel",
-    "Telefone_do_Responsavel",
-    "Nome_do_Jogador",
-    "CPF_do_Jogador",
-    "Data_Nascimento_do_Jogador"
-]
+def handler(request):
+    method = request.method
+    path = request.path
 
-def garantir_cabecalhos():
-    try:
-        if not sheet_pendentes.row_values(1):
-            sheet_pendentes.append_row(HEADERS)
-        if not sheet_aprovados.row_values(1):
-            sheet_aprovados.append_row(HEADERS)
-    except Exception as e:
-        print("ERRO ao garantir cabeçalhos:", e)
+    sheet_pendentes, sheet_aprovados = load_sheets()
 
-garantir_cabecalhos()
+    # ------ ROTAS ------
+    if path == "/":
+        return {
+            "statusCode": 200,
+            "headers": {"Content-Type": "application/json"},
+            "body": json.dumps({"message": "API funcionando"})
+        }
 
+    # CADASTRAR
+    if path == "/cadastrar" and method == "POST":
+        body = request.json
 
-# -----------------------------
-# ROTAS
-# -----------------------------
-@app.route("/")
-def formulario():
-    return render_template("formulario.html")
-
-
-@app.route("/cadastrar", methods=["POST"])
-def cadastrar():
-    try:
         dados = [
-            request.form.get("nome_responsavel", ""),
-            request.form.get("cpf_responsavel", ""),
-            request.form.get("telefone_responsavel", ""),
-            request.form.get("nome_jogador", ""),
-            request.form.get("cpf_jogador", ""),
-            request.form.get("data_nascimento", "")
+            body.get("nome_responsavel", ""),
+            body.get("cpf_responsavel", ""),
+            body.get("telefone_responsavel", ""),
+            body.get("nome_jogador", ""),
+            body.get("cpf_jogador", ""),
+            body.get("data_nascimento", "")
         ]
+
         sheet_pendentes.append_row(dados)
-        return "Cadastro realizado com sucesso!"
-    except Exception as e:
-        print("ERRO ao cadastrar:", e)
-        return "Erro ao cadastrar.", 500
 
+        return {
+            "statusCode": 200,
+            "body": "Cadastro realizado com sucesso!"
+        }
 
-@app.route("/pendentes")
-def pendentes():
-    try:
+    # LISTAR PENDENTES
+    if path == "/pendentes":
         registros = sheet_pendentes.get_all_records()
-        return jsonify({"pendentes": registros})
-    except Exception as e:
-        print("ERRO ao listar:", e)
-        return "Erro ao listar.", 500
 
+        return {
+            "statusCode": 200,
+            "headers": {"Content-Type": "application/json"},
+            "body": json.dumps({"pendentes": registros})
+        }
 
-@app.route("/aprovar/<int:linha>")
-def aprovar(linha):
-    try:
-        linha_real = linha + 2
-        dados = sheet_pendentes.row_values(linha_real)
-        sheet_aprovados.append_row(dados)
-        sheet_pendentes.delete_rows(linha_real)
-        return "Aprovado!"
-    except Exception as e:
-        print("ERRO ao aprovar:", e)
-        return "Erro ao aprovar.", 500
+    # APROVAR
+    if path.startswith("/aprovar/"):
+        try:
+            _, _, linha_raw = path.partition("/aprovar/")
+            linha = int(linha_raw)
 
+            linha_real = linha + 2
+            dados = sheet_pendentes.row_values(linha_real)
+            sheet_aprovados.append_row(dados)
+            sheet_pendentes.delete_rows(linha_real)
 
-# -----------------------------
-# HANDLER PARA VERCEL
-# -----------------------------
-def handler(request, response=None):
-    return app(request, response)
+            return {"statusCode": 200, "body": "Aprovado!"}
+
+        except Exception as e:
+            return {"statusCode": 500, "body": f"Erro: {str(e)}"}
+
+    return {"statusCode": 404, "body": "Rota não encontrada"}
