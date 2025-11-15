@@ -1,11 +1,15 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
-import csv
 import os
+import json
 from datetime import datetime
-import re 
+import re
 
-# --- INÍCIO DA CLASSE FutsalAdminApp (AGORA UNIFICADA) ---
+# Google Sheets
+import gspread
+from google.oauth2.service_account import Credentials
+
+# --- INÍCIO DA CLASSE FutsalAdminApp (AGORA UNIFICADA, usando Google Sheets) ---
 
 class FutsalAdminApp:
     def __init__(self, master):
@@ -20,11 +24,20 @@ class FutsalAdminApp:
             screen_height = master.winfo_screenheight()
             master.geometry(f"{screen_width}x{screen_height}+0+0")
         
-        # --- Configurações do Sistema (Admin) ---
-        self.ARQUIVO_PENDENTES = 'jogadores_pendentes.csv'
-        self.ARQUIVO_AUTORIZADOS = 'jogadores_autorizados.csv'
-        
-        # --- COLUNAS (Admin) ---
+        # ---------------- Google Sheets CONFIG ----------------
+        # Substitua pelo seu ID de planilha
+        self.SHEET_ID = "1OrF458H7gU3U2J4lamcX4uV_7cIcdLOr52jTK956aWU"
+        # Nomes das abas/worksheets
+        self.ARQUIVO_PENDENTES = 'pendentes'
+        self.ARQUIVO_AUTORIZADOS = 'aprovados'
+
+        # Escopos
+        self.scope = [
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive"
+        ]
+
+        # cabeçalhos esperados (mesmo formato que você já usa)
         self.COLUNAS_CADASTRO = [
             'Nome_do_Jogador',
             'CPF_do_Jogador',
@@ -34,10 +47,39 @@ class FutsalAdminApp:
             'Tel_do_Responsavel',
             'Turma'
         ]
-        
-        self.CHAVE_CADASTRO = 'CPF_do_Responsavel' 
-        self.COLUNAS_AUTORIZADOS = self.COLUNAS_CADASTRO.copy() 
-        
+        self.COLUNAS_AUTORIZADOS = self.COLUNAS_CADASTRO.copy()
+        self.CHAVE_CADASTRO = 'CPF_do_Responsavel'
+
+        # Tenta conectar ao Google Sheets
+        try:
+            creds_info = None
+            if os.getenv("GOOGLE_SERVICE_ACCOUNT"):
+                creds_info = json.loads(os.getenv("GOOGLE_SERVICE_ACCOUNT"))
+                creds = Credentials.from_service_account_info(creds_info, scopes=self.scope)
+            else:
+                # arquivo service_account.json no mesmo diretório
+                creds = Credentials.from_service_account_file("service_account.json", scopes=self.scope)
+
+            self.client = gspread.authorize(creds)
+
+            # abre as worksheets (se não existirem, cria)
+            spreadsheet = self.client.open_by_key(self.SHEET_ID)
+            try:
+                self.sheet_pendentes = spreadsheet.worksheet(self.ARQUIVO_PENDENTES)
+            except gspread.WorksheetNotFound:
+                self.sheet_pendentes = spreadsheet.add_worksheet(title=self.ARQUIVO_PENDENTES, rows="1000", cols="20")
+            try:
+                self.sheet_aprovados = spreadsheet.worksheet(self.ARQUIVO_AUTORIZADOS)
+            except gspread.WorksheetNotFound:
+                self.sheet_aprovados = spreadsheet.add_worksheet(title=self.ARQUIVO_AUTORIZADOS, rows="1000", cols="20")
+            
+            # garante cabeçalhos
+            self._garantir_cabecalhos()
+
+        except Exception as e:
+            messagebox.showerror("Erro Google Sheets", f"Falha ao conectar ao Google Sheets: {e}")
+            raise e
+
         # --- DADOS (Abas Times e Boletos) ---
         # (Dados estão vazios, precisam ser carregados ou preenchidos)
         self.times = {}
@@ -74,31 +116,53 @@ class FutsalAdminApp:
         self.style.map('Custom.Treeview', background=[('selected', '#007BFF')], foreground=[('selected', 'white')])
 
         # --- Estilos de Cabeçalho (Treeview Headings) ---
-        
-        # Estilo Admin - Pendentes
         self.style.configure('Pendentes.Treeview', **self.style.configure('Custom.Treeview'))
         self.style.configure('Pendentes.Treeview.Heading', background='#F39C12', foreground='black', font=('Times New Roman', 10, 'bold'), anchor='center')
-        
-        # Estilo Admin - Autorizados
         self.style.configure('Autorizados.Treeview', **self.style.configure('Custom.Treeview'))
         self.style.configure('Autorizados.Treeview.Heading', background='#27AE60', foreground='white', font=('Times New Roman', 10, 'bold'), anchor='center')
-        
-        # Estilo Aba Times
         self.style.configure('Times.Treeview', **self.style.configure('Custom.Treeview'))
-        self.style.configure('Times.Treeview.Heading', background='#5E35B1', foreground='white', font=('Times New Roman', 10, 'bold'), anchor='center') # Roxo
-        
-        # Estilo Aba Boleto
+        self.style.configure('Times.Treeview.Heading', background='#5E35B1', foreground='white', font=('Times New Roman', 10, 'bold'), anchor='center')
         self.style.configure('Boleto.Treeview', **self.style.configure('Custom.Treeview'))
-        self.style.configure('Boleto.Treeview.Heading', background='#1E88E5', foreground='white', font=('Times New Roman', 10, 'bold'), anchor='center') # Azul
+        self.style.configure('Boleto.Treeview.Heading', background='#1E88E5', foreground='white', font=('Times New Roman', 10, 'bold'), anchor='center')
 
         # Cria a interface principal
         self._criar_interface()
         
 
-    # ----------------------------------------------------------------------
-    # --- CRIAÇÃO DA INTERFACE PRINCIPAL (NOTEBOOK) ---
-    # ----------------------------------------------------------------------
-    
+    # ------------------------ Google Sheets helpers ------------------------
+    def _garantir_cabecalhos(self):
+        """
+        Garante que ambas as abas (pendentes e aprovados) tenham o cabeçalho.
+        Se a primeira linha estiver vazia, escreve os HEADERS.
+        """
+        try:
+            # Pendentes
+            try:
+                row1 = self.sheet_pendentes.row_values(1)
+            except Exception:
+                row1 = []
+            if not row1 or all(not c for c in row1):
+                self.sheet_pendentes.append_row(self.COLUNAS_CADASTRO)
+            # Aprovados
+            try:
+                row1a = self.sheet_aprovados.row_values(1)
+            except Exception:
+                row1a = []
+            if not row1a or all(not c for c in row1a):
+                self.sheet_aprovados.append_row(self.COLUNAS_AUTORIZADOS)
+        except Exception as e:
+            messagebox.showerror("Erro Cabeçalhos", f"Falha ao garantir cabeçalhos nas abas do Google Sheets: {e}")
+            raise
+
+    def _sheet_por_nome(self, nome_arquivo):
+        if nome_arquivo == self.ARQUIVO_PENDENTES:
+            return self.sheet_pendentes
+        elif nome_arquivo == self.ARQUIVO_AUTORIZADOS:
+            return self.sheet_aprovados
+        else:
+            raise ValueError("Nome de aba inválido")
+
+    # ------------------------ Interface (Notebook + Abas) ------------------------
     def _criar_interface(self):
         # Notebook para interligar as 3 interfaces
         self.notebook = ttk.Notebook(self.master)
@@ -120,15 +184,13 @@ class FutsalAdminApp:
         self._criar_aba_boletos(self.aba_boletos)
         
         # --- Carregamento Inicial (Aba Admin) ---
-        self._verificar_arquivo(self.ARQUIVO_AUTORIZADOS)
-        self._verificar_arquivo(self.ARQUIVO_PENDENTES)
+        # substitui verificação de arquivos por garantia de cabeçalho já feita
         self._carregar_admin_dados()
 
 
     # ----------------------------------------------------------------------
     # --- MÉTODO PARA CRIAR ABA 1: ADMINISTRAÇÃO ---
     # ----------------------------------------------------------------------
-
     def _criar_aba_admin(self, aba):
         aba.grid_columnconfigure(0, weight=1) 
         aba.grid_rowconfigure(1, weight=1) 
@@ -186,21 +248,18 @@ class FutsalAdminApp:
         ttk.Button(frame_botoes_excluir_autorizado, text="🗑️ EXCLUIR JOGADOR SELECIONADO DA LISTA (Ação Rápida)", command=self.excluir_jogador_autorizado, style='Remover.TButton').pack(fill="x") 
 
     # ----------------------------------------------------------------------
-    # --- MÉTODO PARA CRIAR ABA 2: TIMES --- (RE-ADICIONADO)
+    # --- MÉTODO PARA CRIAR ABA 2: TIMES ---
     # ----------------------------------------------------------------------
     def _criar_aba_times(self, aba):
-        # PanedWindow para um divisor redimensionável
         paned_window = ttk.PanedWindow(aba, orient=tk.HORIZONTAL)
         paned_window.pack(fill="both", expand=True, pady=5)
 
-        # -------- Frame Esquerdo (Times) --------
         frame_times_container = ttk.LabelFrame(paned_window, text="Times", padding=10)
         paned_window.add(frame_times_container, weight=1)
 
         label_times = ttk.Label(frame_times_container, text="Contagem de Jogadores por Time", font=("Times New Roman", 12, 'bold'))
         label_times.pack(pady=5)
 
-        # --- Treeview de Times (com scroll) ---
         frame_tree_times = ttk.Frame(frame_times_container)
         frame_tree_times.pack(fill="both", expand=True)
 
@@ -227,14 +286,12 @@ class FutsalAdminApp:
         for time, jogadores in self.times.items():
             self.tree_times.insert("", tk.END, values=(time, len(jogadores)), text=time)
 
-        # -------- Frame Direito (Detalhes Jogadores) --------
         frame_det = ttk.LabelFrame(paned_window, text="Jogadores do Time", padding=10)
         paned_window.add(frame_det, weight=2)
 
         self.label_det_jogadores = ttk.Label(frame_det, text="Selecione um time ao lado para ver os jogadores.", font=("Times New Roman", 12))
         self.label_det_jogadores.pack(pady=5)
 
-        # --- Treeview de Jogadores (com scroll) ---
         frame_tree_jogadores = ttk.Frame(frame_det)
         frame_tree_jogadores.pack(fill="both", expand=True)
 
@@ -260,7 +317,6 @@ class FutsalAdminApp:
 
         self.tree_times.bind("<ButtonRelease-1>", self._mostrar_jogadores)
 
-    # --- Método de Evento (da Aba Times) --- (RE-ADICIONADO)
     def _mostrar_jogadores(self, event):
         selection = self.tree_times.focus()
         if not selection:
@@ -276,9 +332,8 @@ class FutsalAdminApp:
             for jogador in self.times[time]:
                 self.tree_jogadores.insert("", tk.END, values=(jogador["nome"], jogador["idade"]))
 
-
     # ----------------------------------------------------------------------
-    # --- MÉTODO PARA CRIAR ABA 3: BOLETOS --- (RE-ADICIONADO)
+    # --- MÉTODO PARA CRIAR ABA 3: BOLETOS ---
     # ----------------------------------------------------------------------
     def _criar_aba_boletos(self, aba):
         frame_boletos_container = ttk.LabelFrame(aba, text="Controle de Pagamentos", padding=10)
@@ -287,7 +342,6 @@ class FutsalAdminApp:
         label_boletos = ttk.Label(frame_boletos_container, text="Status de Pagamento dos Jogadores", font=("Times New Roman", 12, 'bold'))
         label_boletos.pack(pady=5)
 
-        # --- Treeview de Boletos (com scroll) ---
         frame_tree_boletos = ttk.Frame(frame_boletos_container)
         frame_tree_boletos.pack(fill="both", expand=True, pady=10)
 
@@ -321,112 +375,105 @@ class FutsalAdminApp:
 
 
     # ----------------------------------------------------------------------
-    # --- MÉTODOS AUXILIARES E DE BACKEND (ADMIN) ---
+    # --- MÉTODOS AUXILIARES E DE BACKEND (SUBSTITUINDO CSV POR GOOGLE SHEETS) ---
     # ----------------------------------------------------------------------
 
-    # --- Funções de Arquivo ---
-    
-    def _verificar_arquivo(self, nome_arquivo):
-        if not os.path.exists(nome_arquivo):
-            colunas_ref = self.COLUNAS_AUTORIZADOS if nome_arquivo == self.ARQUIVO_AUTORIZADOS else self.COLUNAS_CADASTRO
-            try:
-                with open(nome_arquivo, mode='w', newline='', encoding='utf-8') as f:
-                    escritor = csv.writer(f, delimiter=';')
-                    escritor.writerow(colunas_ref)
-            except IOError as e:
-                messagebox.showerror("Erro de Arquivo", f"Não foi possível criar o arquivo {nome_arquivo}: {e}")
-
     def _ler_todos_dados(self, nome_arquivo, colunas):
-        if not os.path.exists(nome_arquivo):
-            return []
-        dados = []
+        """
+        Retorna lista de listas (linhas) sem o cabeçalho.
+        """
         try:
-            with open(nome_arquivo, mode='r', newline='', encoding='utf-8') as f:
-                leitor = csv.reader(f, delimiter=';')
-                cabecalho = next(leitor, None)
-                if cabecalho != colunas:
-                    messagebox.showwarning("Aviso de Arquivo", f"O cabeçalho de '{nome_arquivo}' não coincide com o esperado. Arquivo pode estar corrompido ou desatualizado.")
-                    for linha in leitor:
-                        if len(linha) == len(colunas):
-                             dados.append(linha)
-                        else:
-                            dados.append(linha + ['ERRO'] * (len(colunas) - len(linha))) 
-                    return dados
-                
-                for linha in leitor:
-                    if len(linha) == len(colunas):
-                        dados.append(linha)
-                    else:
-                        dados.append(linha + ['ERRO'] * (len(colunas) - len(linha))) 
-                        
+            sheet = self._sheet_por_nome(nome_arquivo)
+            all_vals = sheet.get_all_values()
+            if not all_vals or len(all_vals) <= 1:
+                return []
+            rows = all_vals[1:]  # ignora cabeçalho
+            # garante que cada linha tenha o tamanho de colunas (preenche com '')
+            normalized = []
+            for r in rows:
+                if len(r) < len(colunas):
+                    r = r + [''] * (len(colunas) - len(r))
+                normalized.append(r[:len(colunas)])
+            return normalized
         except Exception as e:
-            messagebox.showerror("Erro de Leitura", f"Falha ao ler o arquivo {nome_arquivo}: {e}")
+            messagebox.showerror("Erro Leitura", f"Falha ao ler dados da aba '{nome_arquivo}': {e}")
             return []
-        return dados
-        
+
     def _adicionar_registro(self, nome_arquivo, dados, colunas):
+        """
+        Adiciona uma linha na aba correspondente.
+        'dados' deve ser uma lista com o mesmo número de colunas.
+        """
         try:
-            with open(nome_arquivo, mode='a', newline='', encoding='utf-8') as f:
-                escritor = csv.writer(f, delimiter=';')
-                escritor.writerow(dados)
+            sheet = self._sheet_por_nome(nome_arquivo)
+            # Se dados tiverem menos colunas, completa com vazios
+            row = list(dados)[:len(colunas)]
+            if len(row) < len(colunas):
+                row += [''] * (len(colunas) - len(row))
+            sheet.append_row(row)
             return True
         except Exception as e:
-            messagebox.showerror("Erro de Escrita", f"Falha ao adicionar registro em {nome_arquivo}: {e}")
+            messagebox.showerror("Erro Escrita", f"Falha ao adicionar registro na aba '{nome_arquivo}': {e}")
             return False
 
     def _remover_registro_por_dados(self, nome_arquivo, dados_para_remover, colunas):
+        """
+        Procura a primeira linha que corresponda exatamente aos dados fornecidos (após strip)
+        e a remove. Retorna True se removeu.
+        """
         try:
-            todos_dados = self._ler_todos_dados(nome_arquivo, colunas)
+            sheet = self._sheet_por_nome(nome_arquivo)
+            all_vals = sheet.get_all_values()
+            if not all_vals or len(all_vals) <= 1:
+                return False
+            # procura linha
             dados_alvo_normalizados = [d.strip() for d in dados_para_remover]
-            dados_filtrados = []
-            registro_removido = False
-            
-            for linha in todos_dados:
-                linha_normalizada = [d.strip() for d in linha]
-                if linha_normalizada == dados_alvo_normalizados and not registro_removido:
-                    registro_removido = True 
-                    continue 
-                dados_filtrados.append(linha)
-            
-            if not registro_removido: return False 
-            
-            with open(nome_arquivo, mode='w', newline='', encoding='utf-8') as f:
-                escritor = csv.writer(f, delimiter=';')
-                escritor.writerow(colunas)
-                escritor.writerows(dados_filtrados) 
-            return True
+            for idx, linha in enumerate(all_vals[1:], start=2):  # start=2 -> índice real no sheet
+                linha_norm = [c.strip() for c in linha]
+                # normaliza comprimento
+                if len(linha_norm) < len(colunas):
+                    linha_norm += [''] * (len(colunas) - len(linha_norm))
+                if linha_norm[:len(dados_alvo_normalizados)] == dados_alvo_normalizados:
+                    sheet.delete_rows(idx)
+                    return True
+            return False
         except Exception as e:
-            messagebox.showerror("Erro de Remoção", f"Falha ao remover registro de {nome_arquivo}: {e}")
+            messagebox.showerror("Erro Remoção", f"Falha ao remover registro da aba '{nome_arquivo}': {e}")
             return False
 
     def _atualizar_registro_por_dados(self, nome_arquivo, dados_antigos, novos_dados, colunas):
+        """
+        Encontra a primeira ocorrência exata de dados_antigos e substitui pela lista novos_dados.
+        """
         try:
-            todos_dados = self._ler_todos_dados(nome_arquivo, colunas)
+            sheet = self._sheet_por_nome(nome_arquivo)
+            all_vals = sheet.get_all_values()
+            if not all_vals or len(all_vals) <= 1:
+                return False
             dados_alvo_normalizados = [d.strip() for d in dados_antigos]
-            registro_encontrado = False
-            dados_atualizados = []
-            
-            for linha in todos_dados:
-                linha_normalizada = [d.strip() for d in linha]
-                if linha_normalizada == dados_alvo_normalizados and not registro_encontrado:
-                    dados_atualizados.append(novos_dados)
-                    registro_encontrado = True
-                else:
-                    dados_atualizados.append(linha) 
-            
-            if not registro_encontrado: return False
-                
-            with open(nome_arquivo, mode='w', newline='', encoding='utf-8') as f:
-                escritor = csv.writer(f, delimiter=';')
-                escritor.writerow(colunas)
-                escritor.writerows(dados_atualizados) 
-            return True
+            for idx, linha in enumerate(all_vals[1:], start=2):
+                linha_norm = [c.strip() for c in linha]
+                if len(linha_norm) < len(colunas):
+                    linha_norm += [''] * (len(colunas) - len(linha_norm))
+                if linha_norm == dados_alvo_normalizados:
+                    # prepara novos dados com comprimento correto
+                    novos = list(novos_dados)[:len(colunas)]
+                    if len(novos) < len(colunas):
+                        novos += [''] * (len(colunas) - len(novos))
+                    # atualiza linha inteira (A..G)
+                    col_range = f"A{idx}:{chr(ord('A') + len(colunas) - 1)}{idx}"
+                    sheet.update(col_range, [novos])
+                    return True
+            return False
         except Exception as e:
-            messagebox.showerror("Erro de Atualização", f"Falha ao atualizar registro em {nome_arquivo}: {e}")
+            messagebox.showerror("Erro Atualização", f"Falha ao atualizar registro na aba '{nome_arquivo}': {e}")
             return False
 
     def _atualizar_treeview(self, treeview, nome_arquivo, colunas):
-        if not treeview: # Adiciona verificação para evitar erro
+        """
+        Atualiza o treeview com os dados da aba nome_arquivo.
+        """
+        if not treeview:
             return
         for i in treeview.get_children():
             treeview.delete(i)
@@ -439,7 +486,6 @@ class FutsalAdminApp:
                 treeview.tag_configure('erro', background='#FFDDDD')
 
     # --- Funções de Criação de Widget (Helpers) ---
-
     def _cria_scrollable_frame(self, container):
         outer_frame = ttk.Frame(container)
         outer_frame.pack(fill="both", expand=True) 
@@ -523,7 +569,6 @@ class FutsalAdminApp:
         return frame_cadastro, row_index
 
     # --- Funções de Eventos e Lógica (Aba Admin) ---
-
     def _alternar_botoes(self, modo):
         self.modo_edicao = modo
         for widget in self.frame_botoes_acao.winfo_children():
@@ -738,7 +783,7 @@ class FutsalAdminApp:
             messagebox.showerror("Erro", "Falha ao excluir o cadastro autorizado.")
 
     def _carregar_admin_dados(self):
-        # Apenas atualiza as treeviews da aba admin
+        # Atualiza as treeviews da aba admin lendo do Google Sheets
         self._atualizar_treeview(self.tree_pendentes, self.ARQUIVO_PENDENTES, colunas=self.COLUNAS_CADASTRO)
         self._atualizar_treeview(self.tree_autorizados, self.ARQUIVO_AUTORIZADOS, colunas=self.COLUNAS_AUTORIZADOS)
         self._limpar_campos_admin()
