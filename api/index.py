@@ -4,8 +4,11 @@ from google.oauth2.service_account import Credentials
 import json
 import os
 
-# Flask configurado para a pasta de templates
-app = Flask(__name__, template_folder="templates")
+# Caminho correto dos templates quando hospedado no Vercel
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+TEMPLATES_DIR = os.path.join(BASE_DIR, "../templates")
+
+app = Flask(__name__, template_folder=TEMPLATES_DIR)
 
 # -----------------------------
 # CONFIG GOOGLE SHEETS
@@ -19,7 +22,7 @@ scope = [
 # --- CARREGA A CHAVE DO SERVICE ACCOUNT ---
 try:
     if os.getenv("GOOGLE_SERVICE_ACCOUNT"):
-        # Vercel: chave vem da variável de ambiente
+        # Vercel: chave vem da variável de ambiente (STRING JSON)
         info = json.loads(os.getenv("GOOGLE_SERVICE_ACCOUNT"))
     else:
         # Local: arquivo JSON
@@ -29,16 +32,16 @@ try:
     creds = Credentials.from_service_account_info(info, scopes=scope)
     client = gspread.authorize(creds)
 
-    # Acessa as worksheets
     sheet_pendentes = client.open_by_key(SHEET_ID).worksheet("pendentes")
     sheet_aprovados = client.open_by_key(SHEET_ID).worksheet("aprovados")
+
 except Exception as e:
-    # Se falhar, imprime o erro e impede a inicialização do Flask
     print("ERRO ao conectar ao Google Sheets:", e)
     raise e
 
+
 # -----------------------------
-# CABEÇALHOS DAS PLANILHAS
+# CABEÇALHOS
 # -----------------------------
 HEADERS = [
     "Nome_do_Responsavel",
@@ -57,16 +60,17 @@ def garantir_cabecalhos():
             sheet_aprovados.append_row(HEADERS)
     except Exception as e:
         print("ERRO ao garantir cabeçalhos:", e)
-        raise e
 
 garantir_cabecalhos()
 
+
 # -----------------------------
-# ROTAS DO SISTEMA
+# ROTAS
 # -----------------------------
 @app.route("/")
 def formulario():
     return render_template("formulario.html")
+
 
 @app.route("/cadastrar", methods=["POST"])
 def cadastrar():
@@ -80,35 +84,37 @@ def cadastrar():
             request.form.get("data_nascimento", "")
         ]
         sheet_pendentes.append_row(dados)
-        return "Cadastro realizado com sucesso! O jogador agora está na lista de pendentes."
+        return "Cadastro realizado com sucesso!"
     except Exception as e:
-        print("ERRO ao cadastrar jogador:", e)
-        return "Erro ao cadastrar jogador.", 500
+        print("ERRO ao cadastrar:", e)
+        return "Erro ao cadastrar.", 500
+
 
 @app.route("/pendentes")
-def lista_pendentes():
+def pendentes():
     try:
         registros = sheet_pendentes.get_all_records()
         return jsonify({"pendentes": registros})
     except Exception as e:
-        print("ERRO ao listar pendentes:", e)
-        return "Erro ao listar pendentes.", 500
+        print("ERRO ao listar:", e)
+        return "Erro ao listar.", 500
+
 
 @app.route("/aprovar/<int:linha>")
 def aprovar(linha):
     try:
-        linha_real = linha + 2  # compensar cabeçalho
+        linha_real = linha + 2
         dados = sheet_pendentes.row_values(linha_real)
         sheet_aprovados.append_row(dados)
         sheet_pendentes.delete_rows(linha_real)
-        return "Jogador aprovado com sucesso!"
+        return "Aprovado!"
     except Exception as e:
-        print("ERRO ao aprovar jogador:", e)
-        return "Erro ao aprovar jogador.", 500
+        print("ERRO ao aprovar:", e)
+        return "Erro ao aprovar.", 500
+
 
 # -----------------------------
-# MAIN
+# HANDLER PARA VERCEL
 # -----------------------------
-if __name__ == "__main__":
-    # Localmente
-    app.run(debug=True, host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+def handler(request, response=None):
+    return app(request, response)
