@@ -25,6 +25,7 @@ class FutsalAdminApp:
         self.SHEET_ID = "1OrF458H7gU3U2J4lamcX4uV_7cIcdLOr52jTK956aWU" # Substitua pelo seu ID
         self.ARQUIVO_PENDENTES = 'pendentes'
         self.ARQUIVO_AUTORIZADOS = 'aprovados'
+        self.ARQUIVO_BOLETOS = 'boletos'
         self.ARQUIVO_PRE_CADASTRO = self.ARQUIVO_PENDENTES
 
         self.scope = [
@@ -41,6 +42,18 @@ class FutsalAdminApp:
             'Tel_do_Responsavel'
         ]
         self.COLUNAS_AUTORIZADOS = self.COLUNAS_CADASTRO + ['Turma'] 
+        
+        # COLUNAS REQUERIDAS PARA A TELA DE BOLETOS E PERSISTÊNCIA NO SHEETS
+        self.COLUNAS_BOLETO = [ 
+            'Nome_do_Responsavel', 
+            'Nome_do_Jogador',
+            'CPF_do_Responsavel',  
+            'Tel_do_Responsavel',
+            'Turma', 
+            'Vencimento', 
+            'Status'
+        ]
+
         self.CHAVE_CADASTRO = 'CPF_do_Responsavel' # CHAVE PRIMÁRIA PARA BUSCA
 
         try:
@@ -59,6 +72,10 @@ class FutsalAdminApp:
             
             try: self.sheet_aprovados = spreadsheet.worksheet(self.ARQUIVO_AUTORIZADOS)
             except gspread.WorksheetNotFound: self.sheet_aprovados = spreadsheet.add_worksheet(title=self.ARQUIVO_AUTORIZADOS, rows="1000", cols="20")
+            
+            # Inicializa a nova Sheet de Boletos
+            try: self.sheet_boletos = spreadsheet.worksheet(self.ARQUIVO_BOLETOS)
+            except gspread.WorksheetNotFound: self.sheet_boletos = spreadsheet.add_worksheet(title=self.ARQUIVO_BOLETOS, rows="1000", cols="20")
             
             self._garantir_cabecalhos()
 
@@ -109,6 +126,10 @@ class FutsalAdminApp:
                 self.sheet_pendentes.append_row(self.COLUNAS_AUTORIZADOS)
             if not self.sheet_aprovados.row_values(1) or all(not c for c in self.sheet_aprovados.row_values(1)):
                 self.sheet_aprovados.append_row(self.COLUNAS_AUTORIZADOS)
+            # Garante cabeçalhos para a sheet de boletos
+            if not self.sheet_boletos.row_values(1) or all(not c for c in self.sheet_boletos.row_values(1)):
+                self.sheet_boletos.append_row(self.COLUNAS_BOLETO)
+
         except Exception as e:
             messagebox.showerror("Erro Cabeçalhos", f"Falha ao garantir cabeçalhos nas abas do Google Sheets: {e}")
             raise
@@ -116,6 +137,7 @@ class FutsalAdminApp:
     def _sheet_por_nome(self, nome_arquivo):
         if nome_arquivo == self.ARQUIVO_PENDENTES: return self.sheet_pendentes
         elif nome_arquivo == self.ARQUIVO_AUTORIZADOS: return self.sheet_aprovados
+        elif nome_arquivo == self.ARQUIVO_BOLETOS: return self.sheet_boletos 
         else: raise ValueError("Nome de aba inválido")
 
     def _criar_interface(self):
@@ -355,6 +377,8 @@ class FutsalAdminApp:
             if self._remover_registro_por_dados(self.ARQUIVO_PENDENTES, dados_originais, self.COLUNAS_AUTORIZADOS): 
                 messagebox.showinfo("Sucesso", f"O jogador **{dados_editados[0]}** foi aprovado e autorizado com sucesso!")
                 self._carregar_admin_dados()
+                # APROVOU? Atualiza a lista de boletos na próxima carga para definir o vencimento inicial.
+                self._carregar_dados_times_boletos()
             else:
                 messagebox.showwarning("Aviso", f"O jogador {dados_editados[0]} foi adicionado a autorizados, mas a remoção de pendentes falhou. Por favor, remova manualmente de 'pendentes'.")
         else:
@@ -408,6 +432,8 @@ class FutsalAdminApp:
         if self._atualizar_registro_por_dados(self.ARQUIVO_AUTORIZADOS, dados_antigos, novos_dados, self.COLUNAS_AUTORIZADOS):
             messagebox.showinfo("Sucesso", f"Dados do jogador **{novos_dados[0]}** atualizados com sucesso!")
             self._carregar_admin_dados()
+            # EDITOU? Atualiza a lista de boletos na próxima carga.
+            self._carregar_dados_times_boletos()
         else:
             messagebox.showerror("Erro", "Falha ao atualizar dados do jogador autorizado.")
 
@@ -432,6 +458,8 @@ class FutsalAdminApp:
         if self._remover_registro_por_dados(self.ARQUIVO_AUTORIZADOS, dados_originais, self.COLUNAS_AUTORIZADOS):
             messagebox.showinfo("Sucesso", f"O jogador **{nome_jogador}** foi removido com sucesso!")
             self._carregar_admin_dados()
+            # REMOVEU? Atualiza a lista de boletos na próxima carga.
+            self._carregar_dados_times_boletos()
         else:
             messagebox.showerror("Erro", "Falha ao remover jogador da lista de autorizados.")
 
@@ -501,11 +529,30 @@ class FutsalAdminApp:
         label_boletos.pack(pady=5)
         frame_tree_boletos = ttk.Frame(frame_boletos_container)
         frame_tree_boletos.pack(fill="both", expand=True, pady=10)
-        self.tree_boletos = self._criar_treeview_com_scroll(frame_tree_boletos, colunas=("nome", "turma", "responsavel", "status"), tree_style_name="Boleto.Treeview", altura=10)
-        self.tree_boletos.heading("nome", text="Nome do Jogador"); self.tree_boletos.column("nome", width=200, minwidth=150)
-        self.tree_boletos.heading("turma", text="Turma"); self.tree_boletos.column("turma", width=80, minwidth=50, anchor='center')
-        self.tree_boletos.heading("responsavel", text="Responsável (CPF)"); self.tree_boletos.column("responsavel", width=150, minwidth=100)
-        self.tree_boletos.heading("status", text="Status"); self.tree_boletos.column("status", width=120, minwidth=80, anchor='center')
+        
+        colunas_boleto_display = [c.lower().replace('_', '_') for c in self.COLUNAS_BOLETO] 
+        self.tree_boletos = self._criar_treeview_com_scroll(
+            frame_tree_boletos, 
+            colunas=colunas_boleto_display, 
+            tree_style_name="Boleto.Treeview", 
+            altura=10
+        )
+        
+        self.tree_boletos.heading("nome_do_responsavel", text="Responsável"); 
+        self.tree_boletos.column("nome_do_responsavel", width=150, minwidth=100)
+        self.tree_boletos.heading("nome_do_jogador", text="Nome do Jogador"); 
+        self.tree_boletos.column("nome_do_jogador", width=150, minwidth=100)
+        self.tree_boletos.heading("cpf_do_responsavel", text="CPF Resp."); 
+        self.tree_boletos.column("cpf_do_responsavel", width=100, minwidth=80)
+        self.tree_boletos.heading("tel_do_responsavel", text="Telefone Resp."); 
+        self.tree_boletos.column("tel_do_responsavel", width=100, minwidth=80)
+        self.tree_boletos.heading("turma", text="Turma"); 
+        self.tree_boletos.column("turma", width=80, minwidth=50, anchor='center')
+        self.tree_boletos.heading("vencimento", text="Vencimento"); 
+        self.tree_boletos.column("vencimento", width=100, minwidth=80, anchor='center')
+        self.tree_boletos.heading("status", text="Status"); 
+        self.tree_boletos.column("status", width=100, minwidth=80, anchor='center')
+        
         self.tree_boletos.tag_configure('pago', background='#D4EFDF', foreground='#145A32')
         self.tree_boletos.tag_configure('pendente', background='#FADBD8', foreground='#922B21')
         frame_botoes_boleto = ttk.Frame(frame_boletos_container)
@@ -518,17 +565,199 @@ class FutsalAdminApp:
         if not selected_item:
             messagebox.showwarning("Aviso", "Selecione um jogador na lista de boletos.")
             return
+            
         current_values = list(self.tree_boletos.item(selected_item, 'values'))
-        current_status = current_values[3] 
+        current_status = current_values[6] # Status é a última coluna na lista (índice 6)
+        current_vencimento = current_values[5] # Vencimento é a penúltima coluna (índice 5)
+        cpf_responsavel_selecionado = current_values[2] # CPF é a terceira coluna (índice 2)
+
         novo_status = "Pago" if current_status == "Pendente" else "Pendente"
-        cpf_responsavel_selecionado = current_values[2] 
+        novo_vencimento = current_vencimento # Inicialmente, mantém o vencimento atual
+
+        # --- LÓGICA DE RECORRÊNCIA: ATUALIZA O VENCIMENTO PARA O PRÓXIMO MÊS APÓS PAGAMENTO ---
+        if novo_status == "Pago":
+            try:
+                data_atual = datetime.strptime(current_vencimento, '%d/%m/%Y')
+                
+                # 1. Calcula o próximo mês e ano
+                next_month = data_atual.month + 1
+                next_year = data_atual.year
+                if next_month > 12:
+                    next_month = 1
+                    next_year += 1
+                
+                # 2. Tenta manter o mesmo dia. Se o dia (ex: 31) não existir (ex: em Fev), decrementa o dia.
+                day_to_use = data_atual.day
+                data_proximo_mes = None
+                while day_to_use > 0:
+                    try:
+                        data_proximo_mes = datetime(next_year, next_month, day_to_use)
+                        break
+                    except ValueError:
+                        day_to_use -= 1
+                
+                if data_proximo_mes:
+                    novo_vencimento = data_proximo_mes.strftime('%d/%m/%Y')
+                
+            except Exception as e:
+                print(f"Erro ao calcular novo vencimento: {e}")
+                # Se falhar, novo_vencimento permanece com o valor antigo (current_vencimento)
+                pass 
+        # --- FIM DA LÓGICA DE RECORRÊNCIA ---
+
+
+        # 1. Atualiza o array interno de boletos
         for boleto in self.boletos:
             if boleto.get(self.CHAVE_CADASTRO) == cpf_responsavel_selecionado:
-                boleto['status'] = novo_status; break
+                boleto['Status'] = novo_status
+                if novo_status == "Pago":
+                    boleto['Vencimento'] = novo_vencimento # Atualiza o Vencimento no array
+                break
+        
+        # 2. Atualiza o Treeview
         tag = 'pago' if novo_status == "Pago" else 'pendente'
-        current_values[3] = novo_status 
+        current_values[6] = novo_status # Atualiza o Status no Treeview
+        current_values[5] = novo_vencimento # Atualiza o Vencimento no Treeview
+        
         self.tree_boletos.item(selected_item, values=current_values, tags=(tag,))
-        messagebox.showinfo("Sucesso", f"Status de pagamento alterado para **{novo_status}**.")
+        
+        # 3. Persiste a alteração no Google Sheets
+        if self._atualizar_sheet_boletos():
+            messagebox.showinfo("Sucesso", f"Status de pagamento alterado para **{novo_status}**. Próximo vencimento: **{novo_vencimento}**. Dados salvos no Sheets.")
+        else:
+            messagebox.showwarning("Aviso", f"Status alterado para **{novo_status}**, mas falha ao salvar no Google Sheets.")
+
+    def _carregar_dados_times_boletos(self):
+        self.times = {}
+        self.boletos = []
+        
+        # --- NOVO CÁLCULO DO VENCIMENTO INICIAL (1 MÊS APÓS HOJE) ---
+        hoje = datetime.now()
+        
+        day = hoje.day
+        month = hoje.month + 1
+        year = hoje.year
+        
+        if month > 12:
+            month = 1
+            year += 1
+            
+        data_vencimento_padrao = hoje.strftime('%d/%m/%Y') # Valor padrão de segurança
+
+        # Tenta manter o mesmo dia. Se o dia (ex: 31) não existir (ex: em Fev), decrementa o dia.
+        day_to_use = day
+        data_proximo_mes = None
+        while day_to_use > 0:
+            try:
+                data_proximo_mes = datetime(year, month, day_to_use)
+                break
+            except ValueError:
+                day_to_use -= 1
+        
+        if data_proximo_mes:
+            data_vencimento_padrao = data_proximo_mes.strftime('%d/%m/%Y')
+        else:
+             # Se falhar o cálculo robusto, usa o dia 1 do próximo mês como segurança
+            data_vencimento_padrao = datetime(year, month, 1).strftime('%d/%m/%Y') 
+        # --- FIM DO CÁLCULO DO VENCIMENTO INICIAL ---
+        
+        # 1. Carrega dados de aprovados (Fonte principal para informações do jogador)
+        dados_aprovados_raw = self._ler_todos_dados(self.ARQUIVO_AUTORIZADOS, self.COLUNAS_AUTORIZADOS)
+        
+        # 2. Carrega dados de boletos persistidos (Fonte para Status e Vencimento atualizados)
+        dados_boletos_sheets = self._ler_todos_dados(self.ARQUIVO_BOLETOS, self.COLUNAS_BOLETO)
+        boletos_map_sheets = {} # {CPF_do_Responsavel: {Vencimento: '...', Status: '...'}}
+        for row in dados_boletos_sheets:
+            if len(row) >= len(self.COLUNAS_BOLETO):
+                boleto_dict = dict(zip(self.COLUNAS_BOLETO, row))
+                cpf = boleto_dict.get('CPF_do_Responsavel', '').strip()
+                if cpf:
+                    boletos_map_sheets[cpf] = boleto_dict
+        
+        # Limpa as Treeviews
+        self.tree_times.delete(*self.tree_times.get_children())
+        self.tree_jogadores.delete(*self.tree_jogadores.get_children())
+        self.tree_boletos.delete(*self.tree_boletos.get_children())
+
+        # 3. Processar e consolidar dados
+        boletos_a_salvar = []
+        for row_values in dados_aprovados_raw:
+            try:
+                if len(row_values) < len(self.COLUNAS_AUTORIZADOS):
+                     row_values += [''] * (len(self.COLUNAS_AUTORIZADOS) - len(row_values))
+
+                jogador_data = dict(zip(self.COLUNAS_AUTORIZADOS, row_values))
+                turma = jogador_data.get('Turma', '').strip()
+                cpf_responsavel = jogador_data.get('CPF_do_Responsavel', '').strip()
+                
+                if not turma or not cpf_responsavel: continue
+
+                # --- Lógica de Times ---
+                if turma not in self.times:
+                    self.times[turma] = []
+                self.times[turma].append(jogador_data)
+                
+                # --- Lógica de Boletos (Consolidação e Padrão) ---
+                dados_persistidos = boletos_map_sheets.get(cpf_responsavel, {})
+                
+                boleto_data = {
+                    'Nome_do_Responsavel': jogador_data['Nome_do_Responsavel'],
+                    'Nome_do_Jogador': jogador_data['Nome_do_Jogador'],
+                    'CPF_do_Responsavel': cpf_responsavel,
+                    'Tel_do_Responsavel': jogador_data['Tel_do_Responsavel'],
+                    'Turma': turma,
+                    # Se não houver persistência (é novo), usa o novo cálculo. Senão, usa o valor persistido.
+                    'Vencimento': dados_persistidos.get('Vencimento', data_vencimento_padrao), 
+                    'Status': dados_persistidos.get('Status', 'Pendente') 
+                }
+                self.boletos.append(boleto_data)
+                boletos_a_salvar.append(boleto_data) # Armazena para salvar no Sheets
+                
+            except Exception as e:
+                print(f"Erro ao processar linha de jogador aprovado: {e}")
+                continue
+                
+        # 4. Salva a lista consolidada (incluindo novos vencimentos iniciais)
+        if boletos_a_salvar:
+             self._atualizar_sheet_boletos(boletos_a_salvar)
+        
+        # 5. Preencher a Treeview de Times
+        for time, jogadores in self.times.items():
+            self.tree_times.insert("", tk.END, text=time, values=(time, len(jogadores)))
+
+        # 6. Preencher a Treeview de Boletos
+        for boleto in self.boletos:
+            status = boleto['Status']
+            tag = 'pago' if status == 'Pago' else 'pendente'
+            
+            # Garante que a tupla de valores está na ordem correta
+            values_tuple = [boleto.get(col, '') for col in self.COLUNAS_BOLETO]
+            self.tree_boletos.insert("", tk.END, values=values_tuple, tags=(tag,))
+
+        self.label_det_jogadores.config(text="Selecione um time ao lado para ver os jogadores.")
+        
+    def _atualizar_sheet_boletos(self, dados=None):
+        """Salva a lista completa de boletos (status, vencimento) no Google Sheets."""
+        try:
+            if dados is None: dados = self.boletos
+            sheet = self._sheet_por_nome(self.ARQUIVO_BOLETOS)
+            
+            # 1. Monta a lista de linhas a serem salvas
+            linhas_a_salvar = []
+            for boleto in dados:
+                linha = [boleto.get(col, '') for col in self.COLUNAS_BOLETO]
+                linhas_a_salvar.append(linha)
+            
+            # 2. Apaga e re-insere (método mais simples de atualização em gspread)
+            sheet.clear() 
+            sheet.append_row(self.COLUNAS_BOLETO) 
+            if linhas_a_salvar:
+                sheet.append_rows(linhas_a_salvar) 
+                
+            return True
+        except Exception as e:
+            messagebox.showerror("Erro GSheets", f"Falha ao salvar dados de boletos no Sheets: {e}")
+            return False
 
     def _validar_campos(self, dados_completos, modo_admin=False):
         colunas = self.COLUNAS_AUTORIZADOS if modo_admin else self.COLUNAS_CADASTRO
@@ -588,120 +817,78 @@ class FutsalAdminApp:
             rows = all_vals[1:]; normalized = []
             for r in rows:
                 if len(r) < len(colunas): r = r + [''] * (len(colunas) - len(r))
-                normalized.append(r[:len(colunas)])
+                normalized.append(r[:len(colunas)]) # Garante que só pega as colunas que importam
             return normalized
         except Exception as e:
-            messagebox.showerror("Erro Leitura", f"Falha ao ler dados da aba '{nome_arquivo}': {e}"); return []
+            print(f"Erro ao ler dados do Google Sheets ({nome_arquivo}): {e}")
+            messagebox.showwarning("Erro de Leitura", f"Falha ao ler a aba '{nome_arquivo}'. Verifique a conexão e permissões.")
+            return []
 
     def _adicionar_registro(self, nome_arquivo, dados, colunas):
         try:
-            sheet = self._sheet_por_nome(nome_arquivo); row = list(dados)[:len(colunas)]
-            if len(row) < len(colunas): row += [''] * (len(colunas) - len(row))
-            sheet.append_row(row); return True
+            sheet = self._sheet_por_nome(nome_arquivo)
+            if len(dados) < len(colunas): dados = dados + [''] * (len(colunas) - len(dados))
+            sheet.append_row(dados)
+            return True
         except Exception as e:
-            messagebox.showerror("Erro Escrita", f"Falha ao adicionar registro na aba '{nome_arquivo}': {e}"); return False
+            messagebox.showerror("Erro ao Adicionar", f"Falha ao adicionar registro em '{nome_arquivo}': {e}")
+            return False
 
-    # Função de remoção atualizada para buscar apenas pelo CPF do Responsável
-    def _remover_registro_por_dados(self, nome_arquivo, dados_para_remover, colunas):
+    def _remover_registro_por_dados(self, nome_arquivo, dados_chave, colunas):
         try:
-            sheet = self._sheet_por_nome(nome_arquivo); all_vals = sheet.get_all_values()
-            if not all_vals or len(all_vals) <= 1: return False
-
-            # 1. Definir a chave de busca (CPF do Responsavel)
-            chave_idx = colunas.index(self.CHAVE_CADASTRO)
+            sheet = self._sheet_por_nome(nome_arquivo)
+            all_data = self._ler_todos_dados(nome_arquivo, colunas)
             
-            # 2. Obter o valor da chave a ser removida
-            if len(dados_para_remover) <= chave_idx: return False # Garantia
-            chave_remover = dados_para_remover[chave_idx].strip()
+            index_cpf_resp = colunas.index('CPF_do_Responsavel')
+            cpf_chave = dados_chave[index_cpf_resp].strip()
             
-            # 3. Buscar a linha pelo CPF do Responsável (índice da planilha começa em 2)
-            for idx, linha in enumerate(all_vals[1:], start=2):
-                if len(linha) > chave_idx:
-                    chave_planilha = linha[chave_idx].strip()
-                    
-                    if chave_planilha == chave_remover:
-                        sheet.delete_rows(idx); return True
+            # Encontra a linha que corresponde ao CPF do Responsável (e idealmente ao Nome do Jogador)
+            for i, row in enumerate(all_data):
+                if len(row) > index_cpf_resp and row[index_cpf_resp].strip() == cpf_chave:
+                    # Se for um nome de jogador diferente, ele ainda pode ter o mesmo CPF do responsável.
+                    # Adicionamos uma verificação extra para maior segurança (usando o primeiro campo, Nome_do_Jogador)
+                    if row[0].strip() == dados_chave[0].strip():
+                        sheet.delete_rows(i + 2) # +2 para ignorar o índice 0 e o cabeçalho
+                        return True
             return False
         except Exception as e:
-            messagebox.showerror("Erro Remoção", f"Falha ao remover registro da aba '{nome_arquivo}': {e}"); return False
+            messagebox.showerror("Erro ao Remover", f"Falha ao remover registro em '{nome_arquivo}': {e}")
+            return False
 
-    # Função de atualização atualizada para buscar apenas pelo CPF do Responsável
     def _atualizar_registro_por_dados(self, nome_arquivo, dados_antigos, novos_dados, colunas):
         try:
-            sheet = self._sheet_por_nome(nome_arquivo); all_vals = sheet.get_all_values()
-            if not all_vals or len(all_vals) <= 1: return False
+            sheet = self._sheet_por_nome(nome_arquivo)
+            all_data = self._ler_todos_dados(nome_arquivo, colunas)
             
-            # 1. Definir a chave de busca (CPF do Responsavel)
-            chave_idx = colunas.index(self.CHAVE_CADASTRO)
+            index_cpf_resp = colunas.index('CPF_do_Responsavel')
+            cpf_chave = dados_antigos[index_cpf_resp].strip()
+            nome_jogador_antigo = dados_antigos[0].strip()
             
-            # 2. Obter o valor da chave antiga
-            if len(dados_antigos) <= chave_idx: return False # Garantia
-            chave_antiga = dados_antigos[chave_idx].strip()
-
-            # 3. Buscar a linha pelo CPF do Responsável (índice da planilha começa em 2)
-            for idx, linha in enumerate(all_vals[1:], start=2):
-                if len(linha) > chave_idx:
-                    chave_planilha = linha[chave_idx].strip()
-                    
-                    if chave_planilha == chave_antiga:
-                        # 4. Atualizar o registro
-                        novos = list(novos_dados)[:len(colunas)]
-                        if len(novos) < len(colunas): novos += [''] * (len(colunas) - len(novos))
-                        col_range = f"A{idx}:{chr(ord('A') + len(colunas) - 1)}{idx}"
-                        sheet.update(col_range, [novos]); return True
+            # Encontra a linha que corresponde ao CPF do Responsável e Nome do Jogador antigo
+            for i, row in enumerate(all_data):
+                if len(row) > index_cpf_resp and row[index_cpf_resp].strip() == cpf_chave and row[0].strip() == nome_jogador_antigo:
+                    # +2 para obter o número da linha real (ignorando o cabeçalho)
+                    sheet.update(f'A{i + 2}', [novos_dados]) 
+                    return True
             return False
         except Exception as e:
-            messagebox.showerror("Erro Atualização", f"Falha ao atualizar registro na aba '{nome_arquivo}': {e}"); return False
-
-    def _atualizar_treeview(self, treeview, nome_arquivo, colunas):
-        treeview.delete(*treeview.get_children())
-        dados = self._ler_todos_dados(nome_arquivo, colunas)
-        for linha in dados:
-            text_id = linha[0] if linha else 'N/A' 
-            treeview.insert("", tk.END, text=text_id, values=linha)
+            messagebox.showerror("Erro ao Atualizar", f"Falha ao atualizar registro em '{nome_arquivo}': {e}")
+            return False
 
     def _carregar_admin_dados(self):
-        self._limpar_campos_admin() 
-        self._atualizar_treeview(self.tree_pendentes, self.ARQUIVO_PENDENTES, self.COLUNAS_AUTORIZADOS)
-        self._atualizar_treeview(self.tree_autorizados, self.ARQUIVO_AUTORIZADOS, self.COLUNAS_AUTORIZADOS)
-        
-    def _carregar_dados_times_boletos(self):
-        dados_aprovados_raw = self._ler_todos_dados(self.ARQUIVO_AUTORIZADOS, self.COLUNAS_AUTORIZADOS)
-        self.times = {}; self.boletos = []; jogadores_autorizados = []
-        for linha in dados_aprovados_raw:
-            if len(linha) == len(self.COLUNAS_AUTORIZADOS):
-                jogador_data = dict(zip(self.COLUNAS_AUTORIZADOS, linha)); jogadores_autorizados.append(jogador_data)
-                turma = jogador_data.get('Turma', 'Sem Turma').strip()
-                if not turma: turma = 'Sem Turma'
-                if turma not in self.times: self.times[turma] = []
-                self.times[turma].append(jogador_data)
-                cpf_resp = jogador_data.get(self.CHAVE_CADASTRO, '0')
-                is_paid = cpf_resp[-1].isdigit() and int(cpf_resp[-1]) % 2 == 0
-                self.boletos.append({
-                    'nome': jogador_data.get('Nome_do_Jogador'),
-                    'turma': turma,
-                    'CPF_do_Responsavel': cpf_resp,
-                    'status': "Pago" if is_paid else "Pendente"
-                })
+        self.tree_pendentes.delete(*self.tree_pendentes.get_children())
+        self.tree_autorizados.delete(*self.tree_autorizados.get_children())
+        self._limpar_campos_admin()
 
-        self.tree_times.delete(*self.tree_times.get_children())
-        for time, jogadores in self.times.items():
-            self.tree_times.insert("", tk.END, values=(time, len(jogadores)), text=time)
-        
-        self.tree_jogadores.delete(*self.tree_jogadores.get_children())
-        self.label_det_jogadores.config(text="Selecione um time ao lado para ver os jogadores.")
-        
-        self.tree_boletos.delete(*self.tree_boletos.get_children())
-        for boleto in self.boletos:
-            nome = boleto['nome']; turma = boleto['turma']; cpf_responsavel = boleto['CPF_do_Responsavel']; status = boleto['status']
-            tag = 'pago' if status == "Pago" else 'pendente'
-            self.tree_boletos.insert("", tk.END, values=(nome, turma, cpf_responsavel, status), tags=(tag,))
+        dados_pendentes = self._ler_todos_dados(self.ARQUIVO_PENDENTES, self.COLUNAS_AUTORIZADOS)
+        for dados in dados_pendentes:
+            self.tree_pendentes.insert("", tk.END, values=dados, tags=('pendente',))
 
-# --- EXECUÇÃO DO APLICATIVO ---
-if __name__ == "__main__":
-    try:
-        root = tk.Tk()
-        app = FutsalAdminApp(root)
-        root.mainloop()
-    except Exception as e:
-        print(f"Ocorreu um erro fatal durante a inicialização: {e}")
+        dados_autorizados = self._ler_todos_dados(self.ARQUIVO_AUTORIZADOS, self.COLUNAS_AUTORIZADOS)
+        for dados in dados_autorizados:
+            self.tree_autorizados.insert("", tk.END, values=dados, tags=('autorizado',))
+
+if __name__ == '__main__':
+    root = tk.Tk()
+    app = FutsalAdminApp(root)
+    root.mainloop()
